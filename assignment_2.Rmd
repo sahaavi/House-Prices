@@ -1,0 +1,174 @@
+---
+title: "assignment_2"
+author: "Avishek Saha"
+date: '2022-12-17'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 1
+If the random forest model consistently outperforms the linear regression model on both the training set and the holdout test set, then it is likely a better choice for my team selection problem in daily fantasy sports. In this case, the primary goal is to make predictions that are as accurate as possible, and the model with the lower estimated MSE is likely to make more accurate predictions which we're getting by random forest.
+
+## 2
+In this casae, inference is our main priority not prediction as we're developing a report based on the data on hand. We want to know the relationship between response variable (buildup of plaques inside the heart) and predictors (# of meals, grams of red meat daily). Random Forest giving us better prediction at the expense of interpretability. So,  I should choose Linear Regression model for developing my report.
+
+## 3
+```{r 3}
+library(randomForest)
+library(gclus)
+data(body)
+set.seed(02139)
+bodrun <- randomForest(Weight~Height+Gender, data=body)
+bodrun
+```
+
+```{r}
+#FYI this matches the MSE from the printout
+bodrun$mse[500]
+```
+
+The `bodrun$mse[500]` expression retrieves the 500th element of the mse vector, which contains the mean squared error (MSE) for all of the 500 trees in the random forest that means the error rate after making all 500 trees.
+
+```{r}
+#FYI this also matches that printout
+sum((body$Weight-predict(bodrun))^2)/length(body$Weight)
+```
+
+Random forest uses bootstrap sampling technique. So, there will be 1/3 of the data left out in each tree which is OOB sample. These will be used for prediction here as we haven't use any other parameter in the predict function. As these OOB samples did not used in model fitting we will get better estimation for long run mse. This is same as the previous one `bodrun$mse[500]` just we're doing it manually here.
+
+```{r}
+#but this is different!
+sum((body$Weight-predict(bodrun, newdata=body))^2)/length(body$Weight)
+```
+
+Here, we are using the whole dataset which includes the training data also. Thats why its underestimating the mse which is not good for long run mse.
+
+
+## 4
+```{r}
+wine_data <- read.csv("winequality-red.csv")
+head(wine_data)
+```
+
+```{r}
+str(wine_data)
+```
+
+#### Splitting data into 70-30 train-test
+```{r}
+set.seed(2022)
+dt = sort(sample(nrow(wine_data), nrow(wine_data)*.7))
+wine_train<-wine_data[dt,]
+wine_test<-wine_data[-dt,]
+```
+
+#### Implementing Trees:
+```{r}
+library(tree)
+wine_reg <- tree(wine_train$quality~., data=wine_train)
+plot(wine_reg)
+text(wine_reg, pretty=0)
+```
+
+```{r}
+set.seed(2022)
+wine_kfold <- cv.tree(wine_reg, K=10)
+plot(wine_kfold, type = "b")
+```
+
+Pruning the tree.
+```{r}
+prune.wine_reg <- prune.tree(wine_reg, best = 8)
+plot(prune.wine_reg)
+text(prune.wine_reg, pretty=0)
+```
+
+Estimated MSE:
+
+```{r}
+wine_reg_mse <- mean((wine_test$quality - predict(prune.wine_reg, wine_test))^2)
+cat("Expected MSE of the test set using tree: ", wine_reg_mse)
+```
+
+#### Implementing Linear Model:
+```{r}
+wine_lm <- lm(wine_train$quality ~ ., data = wine_train)
+summary(wine_lm)
+```
+
+Estimated MSE:
+```{r}
+wine_lm_mse <- mean((wine_test$quality - predict(wine_lm, wine_test))^2)
+cat("Expected MSE of the test set using lm: ", wine_lm_mse)
+```
+
+#### Implementing Random Forest:
+```{r}
+library(randomForest)
+set.seed(2022)
+wine_RF <- randomForest(wine_data$quality~., data=wine_data, importance=TRUE)
+wine_RF
+```
+
+Expected MSE of the test set using Random Forest: 0.3155285
+
+#### Implementing Lasso:
+As all of the predictors variables are not significant so, instead of Ridge Regression applying Lasso.  
+
+The function `cv.glmnet()` automatically performs k-fold cross validation using k = 10 folds.
+
+```{r}
+set.seed(2022)
+library(glmnet)
+
+y <- wine_train$quality
+x <- data.matrix(wine_train[,-12])
+
+# perform k-fold cross-validation to find optimal lambda value
+cv_model <- cv.glmnet(x, y, alpha = 1)
+
+# find optimal lambda value that minimizes test MSE
+best_lambda <- cv_model$lambda.min
+best_lambda
+
+# produce plot of test MSE by lambda value
+plot(cv_model) 
+```
+
+```{r}
+set.seed(2022)
+# coefficients of best model
+wine_lasso <- glmnet(x, y, alpha = 1, lambda = best_lambda)
+```
+
+Estimated MSE:
+```{r}
+wine_lasso_mse <- mean((wine_test$quality - predict(wine_lasso, s=best_lambda, data.matrix(wine_test[,-12])))^2)
+cat("Expected MSE of the test set using Lasso: ", wine_lasso_mse)
+```
+
+#### Implementing Boosting:
+
+```{r}
+library(gbm)
+set.seed(2022)
+wine_boost <- gbm(wine_train$quality~., data=wine_train, n.trees=5000, interaction.depth=2)
+```
+
+Estimated MSE:
+```{r}
+wine_boost_mse <- mean((wine_test$quality - predict(wine_boost, wine_test))^2)
+cat("Expected MSE of the test set using Boosting: ", wine_boost_mse)
+```
+```{r}
+models <- c("Tree MSE", "Linear Regression MSE", "Random Forest MSE", "Lasso MSE", "Boosting MSE")
+mse <- c(wine_reg_mse, wine_lm_mse, wine_RF$mse[500], wine_lasso_mse, wine_boost_mse)
+mse_table <- data.frame(models, mse)
+mse_table
+```
+
+Comparing all the models of above which includes cross validations in the process to find the optimal values, we see that the lowest test MSE we find using Random Forest. It means in this case Random Forest will give us the best prediction.  
+But I'll choose lasso for consulting a company on this data set. As it will remove all the useless predictors from the model that means we will get the most parsimonious model. So company can cut out their cost by not using useless chemicals to improve their wine quality. Also, lasso is easily interpretable compare to other models which helps us to visualize how much each chemical contribute to the wine quality. 
